@@ -89,9 +89,27 @@ async def analyze_receipt(file: UploadFile = File(...)):
         if text_response.endswith("```"):
             text_response = text_response[:-3]
 
-        analysis_data = json.loads(text_response.strip())
+        text_response = text_response.strip()
+
+        if not text_response:
+            raise HTTPException(
+                status_code=422,
+                detail="AI가 영수증을 인식하지 못했습니다. 더 선명한 이미지를 사용해주세요."
+            )
+
+        try:
+            analysis_data = json.loads(text_response)
+        except json.JSONDecodeError:
+            print(f"AI 응답 (JSON 파싱 실패): {text_response}")
+            raise HTTPException(
+                status_code=422,
+                detail="영수증 인식에 실패했습니다. 이미지가 영수증인지, 글씨가 선명한지 확인해주세요."
+            )
+
         return analysis_data
 
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         print(f"Error: {error_msg}")
