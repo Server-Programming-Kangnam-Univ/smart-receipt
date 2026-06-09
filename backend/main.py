@@ -191,6 +191,41 @@ async def get_receipts():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
+@app.delete("/receipts/{receipt_id}")
+async def delete_receipt(receipt_id: str):
+    if not os.path.exists(DATA_FILE):
+        raise HTTPException(status_code=404, detail="데이터 파일이 존재하지 않습니다.")
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            receipts = json.load(f)
+
+        # 삭제할 항목 찾기
+        target_receipt = next((r for r in receipts if r["id"] == receipt_id), None)
+        if not target_receipt:
+            raise HTTPException(status_code=404, detail="해당 ID의 영수증을 찾을 수 없습니다.")
+
+        # 1. 이미지 파일 삭제 (이미지가 있는 경우)
+        image_url = target_receipt.get("image_url")
+        if image_url:
+            # /uploads/filename -> uploads/filename
+            relative_path = image_url.lstrip("/")
+            full_path = os.path.join(os.getcwd(), relative_path)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                print(f"Deleted file: {full_path}")
+
+        # 2. JSON 데이터에서 삭제
+        new_receipts = [r for r in receipts if r["id"] != receipt_id]
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(new_receipts, f, ensure_ascii=False, indent=2)
+
+        return {"message": f"영수증 {receipt_id} 삭제 완료", "id": receipt_id}
+
+    except Exception as e:
+        print(f"Delete Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/receipts/manual/")
 async def add_manual_receipt(data: dict):
     """사용자가 직접 입력한 데이터를 저장합니다."""

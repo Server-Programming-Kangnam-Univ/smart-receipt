@@ -114,6 +114,29 @@ def bulk_upload(files):
             requests.post(ANALYZE_URL, files=files_payload)
     return update_storage()
 
+def delete_receipt_ui(receipt_id):
+    if not receipt_id: return update_storage(), update_home()
+    try:
+        # receipt_id가 "ID: [실제ID]" 형식일 수 있으므로 파싱
+        actual_id = receipt_id.split("ID: ")[-1] if "ID: " in receipt_id else receipt_id
+        res = requests.delete(f"{RECEIPTS_URL}{actual_id}")
+        if res.status_code == 200:
+            print(f"Deleted: {actual_id}")
+    except Exception as e:
+        print(f"Delete error: {e}")
+    
+    # 갱신된 보관함과 홈 데이터를 반환
+    return update_storage(), update_home()
+
+def get_receipt_choices():
+    data = fetch_data()
+    choices = []
+    for r in reversed(data):
+        date = r.get('created_at', '').split('T')[0]
+        item = r.get('analysis', {}).get('most_expensive_item', '내역')
+        choices.append(f"{date} | {item} (ID: {r['id']})")
+    return choices
+
 with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
     with gr.Column(elem_classes="container"):
         gr.HTML('<div class="navbar"><div class="nav-logo">🧾 영수증 AI</div></div>')
@@ -154,6 +177,13 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
                         m_amount = gr.Number(label="금액", value=0)
                         m_status = gr.Textbox(label="상태 (공란 가능)", placeholder="예: 현금결제")
                         manual_btn = gr.Button("내역 추가", variant="secondary")
+                
+                with gr.Column(elem_classes="dashboard-card"):
+                    gr.Markdown("### 🗑️ 내역 삭제하기")
+                    with gr.Row():
+                        delete_select = gr.Dropdown(label="삭제할 영수증 선택", choices=get_receipt_choices())
+                        refresh_del_btn = gr.Button("목록 갱신", scale=0)
+                        delete_btn = gr.Button("선택한 내역 삭제", variant="stop", scale=1)
 
                 receipt_gallery = gr.Gallery(label="내 영수증 목록", columns=4, height="auto")
 
@@ -169,10 +199,13 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
             }
             res = requests.post(f"{BASE_URL}/receipts/manual/", json=payload)
             if res.status_code == 200:
-                return update_storage()
+                return update_storage(), update_home(), gr.update(choices=get_receipt_choices())
         except:
             pass
-        return update_storage()
+        return update_storage(), update_home(), gr.update(choices=get_receipt_choices())
+
+    def refresh_delete_list():
+        return gr.update(choices=get_receipt_choices())
 
     demo.load(update_home, None, [receipt_table, budget_viewer, cat_label, report_box])
     tabs.select(fn=update_home, outputs=[receipt_table, budget_viewer, cat_label, report_box])
@@ -182,11 +215,21 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
     
     upload_btn.click(bulk_upload, inputs=file_input, outputs=receipt_gallery).then(
         update_home, None, [receipt_table, budget_viewer, cat_label, report_box]
+    ).then(
+        refresh_delete_list, None, delete_select
     )
     
-    manual_btn.click(add_manual_entry, inputs=[m_date, m_merchant, m_category, m_amount, m_status], outputs=receipt_gallery).then(
+    manual_btn.click(add_manual_entry, inputs=[m_date, m_merchant, m_category, m_amount, m_status], outputs=[receipt_gallery, receipt_table, delete_select]).then(
         update_home, None, [receipt_table, budget_viewer, cat_label, report_box]
     )
+
+    delete_btn.click(delete_receipt_ui, inputs=delete_select, outputs=[receipt_gallery, receipt_table]).then(
+        update_home, None, [receipt_table, budget_viewer, cat_label, report_box]
+    ).then(
+        refresh_delete_list, None, delete_select
+    )
+    
+    refresh_del_btn.click(refresh_delete_list, None, delete_select)
 
     tabs.select(fn=update_storage, outputs=receipt_gallery)
 
