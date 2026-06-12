@@ -19,6 +19,7 @@ app = FastAPI(title="Receipt AI Analysis API")
 # 저장 폴더 및 데이터 파일 설정
 UPLOAD_DIR = "uploads"
 DATA_FILE = "receipts.json"
+BUDGET_FILE = "budget.json"
 
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
@@ -26,6 +27,10 @@ if not os.path.exists(UPLOAD_DIR):
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump([], f)
+
+if not os.path.exists(BUDGET_FILE):
+    with open(BUDGET_FILE, "w", encoding="utf-8") as f:
+        json.dump({"budget": 1000000}, f)
 
 app.add_middleware(
     CORSMiddleware,
@@ -256,6 +261,67 @@ async def add_manual_receipt(data: dict):
         return receipt_entry
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/budget/")
+def get_budget():
+    with open(BUDGET_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+@app.post("/budget/")
+def update_budget(payload: dict):
+    budget = payload.get("budget", 1000000)
+    with open(BUDGET_FILE, "w", encoding="utf-8") as f:
+        json.dump({"budget": budget}, f)
+    return {"message": "예산이 업데이트되었습니다.", "budget": budget}
+
+
+@app.post("/ask-ai/")
+async def ask_ai(payload: dict):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="Groq API Key가 설정되지 않았습니다.")
+
+    question = payload.get("question")
+    if not question:
+        raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
+
+    if not os.path.exists(DATA_FILE):
+        receipts = []
+    else:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            receipts = json.load(f)
+
+    context_data = []
+    for r in receipts[:20]:
+        analysis = r.get("analysis", {})
+        context_data.append({
+            "date": r.get("created_at", "").split("T")[0],
+            "store": analysis.get("most_expensive_item"),
+            "amount": analysis.get("total_amount"),
+            "category": analysis.get("top_category"),
+        })
+
+    chat_prompt = f"""
+당신은 스마트 소비 분석 비서입니다. 사용자의 영수증 내역 데이터를 바탕으로 질문에 친절하고 정확하게 답해주세요.
+
+[소비 데이터 (최근 20건)]:
+{json.dumps(context_data, ensure_ascii=False)}
+
+[사용자 질문]:
+{question}
+
+답변은 한국어로 2-3문장 내외로 간결하게 해주세요. 데이터에 없는 내용은 유추하지 말고 모른다고 답하세요.
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": chat_prompt}],
+            temperature=0.7,
+        )
+        return {"answer": response.choices[0].message.content.strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 응답 중 오류 발생: {str(e)}")
+
 
 @app.get("/")
 def read_root():
