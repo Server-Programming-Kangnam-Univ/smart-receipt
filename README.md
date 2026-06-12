@@ -72,3 +72,15 @@ git push origin main
 | `fix`   | 버그 수정 |
 | `docs`  | 문서 수정 |
 | `chore` | 기타      |
+
+---
+
+## 🏗️ System Architecture (Backend)
+
+본 프로젝트는 유지보수와 확장이 용이하도록 **계층형 아키텍처(Layered Architecture)**를 채택하여 리팩토링되었습니다.
+
+- **API Layer (`backend/api/`)**: 클라이언트의 HTTP 요청을 접수하고 응답을 반환하는 라우팅 계층 (Router)
+- **Service Layer (`backend/services/`)**: 비즈니스 로직(AI 분석, 이미지 처리, 데이터 저장 등)을 수행하는 핵심 계층 (Logic)
+- **Model Layer (`backend/models/`)**: 데이터의 구조와 규격을 정의하는 계층 (Data Structure)
+
+이러한 구조적 분리를 통해 코드의 가독성을 높이고, 향후 기능 확장 및 데이터베이스 연동 시 유연하게 대처할 수 있도록 설계되었습니다.
