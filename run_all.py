@@ -4,10 +4,9 @@ import sys
 import os
 
 def run_servers():
-    print("🚀 영수증 AI 소비 분석 서비스를 시작합니다...")
+    print("영수증 AI 소비 분석 서비스를 시작합니다...")
 
-    # 1. 백엔드 실행
-    print("📦 백엔드 서버(FastAPI)를 실행하는 중...")
+    print("백엔드 서버(FastAPI)를 실행하는 중...")
     backend_process = subprocess.Popen(
         [sys.executable, "main.py"],
         cwd="backend",
@@ -16,11 +15,9 @@ def run_servers():
         text=True
     )
 
-    # 잠시 대기
     time.sleep(3)
 
-    # 2. 프론트엔드 실행
-    print("🎨 프론트엔드 UI(Gradio)를 실행하는 중...")
+    print("프론트엔드 UI(Gradio)를 실행하는 중...")
     frontend_process = subprocess.Popen(
         [sys.executable, "app.py"],
         cwd="frontend",
@@ -29,26 +26,24 @@ def run_servers():
         text=True
     )
 
-    print("\n✅ 모든 서버가 준비되었습니다!")
+    print("\n모든 서버가 준비되었습니다!")
     print("- 백엔드 API: http://localhost:8000")
     print("- 프론트엔드 UI: http://localhost:7860")
     print("\n서비스를 종료하려면 이 터미널에서 Ctrl+C를 누르세요.")
 
     try:
         while True:
-            # 백엔드 로그 출력 (선택 사항)
             line = backend_process.stdout.readline()
             if line:
-                pass # 너무 복잡해 보일 수 있어 출력은 생략하거나 디버깅 시 사용
-            
+                pass
             if backend_process.poll() is not None or frontend_process.poll() is not None:
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 서버를 종료하는 중...")
+        print("\n서버를 종료하는 중...")
         backend_process.terminate()
         frontend_process.terminate()
-        print("👋 이용해 주셔서 감사합니다!")
+        print("이용해 주셔서 감사합니다!")
 
 if __name__ == "__main__":
     run_servers()
