@@ -394,6 +394,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=custom_css) as demo:
     refresh_delete_list, None, delete_select
 )
 
+
     manual_btn.click(
         add_manual_entry,
         inputs=[m_date, m_merchant, m_category, m_amount, m_status],
@@ -413,3 +414,4 @@ with gr.Blocks(theme=gr.themes.Soft(), css=custom_css) as demo:
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)
+
