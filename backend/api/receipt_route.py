@@ -22,14 +22,26 @@ async def process_single_receipt(file: UploadFile):
     try:
         original_bytes = await file.read()
         processed_bytes = receipt_service.preprocess_image(original_bytes)
-        
-        # AI 분석
+
         analysis_data = ai_service.call_groq_vision(processed_bytes, "image/png")
 
-        # 데이터 저장
+        quality = analysis_data.get("quality_score", {})
+        if not quality.get("is_readable", True):
+            raise HTTPException(
+                status_code=400,
+                detail="사진 인식이 실패했습니다. 또렷하거나, 선명한 영수증 사진을 올려주세요.",
+            )
+
         receipt_entry = receipt_service.save_receipt_data(original_bytes, file.filename, analysis_data)
+
+        unrecognized = quality.get("unrecognized_items_count", 0)
+        if unrecognized > 0:
+            receipt_entry["warning"] = "해당 부분이 인식되지 않습니다. 직접 기입하거나 다시 찍어주세요."
+
         return receipt_entry
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -31,19 +31,23 @@ def preprocess_image(image_bytes: bytes) -> bytes:
 
 def save_receipt_data(original_bytes: bytes, filename: str, analysis_data: dict):
     receipt_id = str(uuid.uuid4())
-    file_ext = filename.split(".")[-1] if "." in filename else "jpg"
-    file_name = f"{receipt_id}.{file_ext}"
-    file_path = os.path.join(UPLOAD_DIR, file_name)
+    is_readable = analysis_data.get("quality_score", {}).get("is_readable", True)
 
-    with open(file_path, "wb") as f:
-        f.write(original_bytes)
+    image_url = None
+    if is_readable:
+        file_ext = filename.split(".")[-1] if "." in filename else "jpg"
+        file_name = f"{receipt_id}.{file_ext}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(original_bytes)
+        image_url = f"/uploads/{file_name}"
 
     receipt_entry = {
         "id": receipt_id,
         "filename": filename,
-        "image_url": f"/uploads/{file_name}",
+        "image_url": image_url,
         "created_at": datetime.now().isoformat(),
-        "analysis": analysis_data
+        "analysis": analysis_data,
     }
 
     with open(DATA_FILE, "r+", encoding="utf-8") as f:
@@ -57,19 +61,43 @@ def save_receipt_data(original_bytes: bytes, filename: str, analysis_data: dict)
 
 def add_manual_receipt(data: dict):
     receipt_id = str(uuid.uuid4())
+    amount = int(data.get("amount", 0))
+    category = data.get("category", "기타")
+    merchant = data.get("merchant", None)
+    date_str = data.get("date", datetime.now().strftime("%Y-%m-%d"))
+
     receipt_entry = {
         "id": receipt_id,
         "filename": "manual_entry",
         "image_url": None,
-        "created_at": data.get("date", datetime.now().isoformat()),
+        "created_at": date_str,
         "analysis": {
-            "items": [],
-            "total_amount": int(data.get("amount", 0)),
-            "top_category": data.get("category", "기타"),
-            "most_expensive_item": data.get("merchant", "-"),
-            "analysis": f"직접 입력 내역: {data.get('status', '')}"
+            "store_info": {
+                "name": merchant,
+                "address": None,
+                "phone": None,
+            },
+            "payment_info": {
+                "date": date_str,
+                "time": None,
+                "total_price": amount,
+                "currency": "KRW",
+                "tax": 0,
+                "discount": 0,
+            },
+            "items": [
+                {
+                    "name": data.get("status", None),
+                    "price": amount,
+                    "quantity": 1,
+                    "category": category,
+                }
+            ],
+            "quality_score": {
+                "is_readable": True,
+                "unrecognized_items_count": 0,
+            },
         },
-        "status": data.get("status", "")
     }
 
     with open(DATA_FILE, "r+", encoding="utf-8") as f:
@@ -78,7 +106,7 @@ def add_manual_receipt(data: dict):
         f.seek(0)
         json.dump(receipts, f, ensure_ascii=False, indent=2)
         f.truncate()
-    
+
     return receipt_entry
 
 def get_all_receipts():

@@ -9,19 +9,72 @@ GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-PROMPT = """
-영수증 이미지를 분석하여 다음 정보를 추출하고 JSON 형식으로 응답해줘.
-JSON 구조:
+CATEGORIES = ["식비", "교통비", "생필품", "문화생활", "전자기기", "기타"]
+
+PROMPT = """You are a receipt OCR parser. Analyze the receipt image and return structured data in JSON format.
+
+[OUTPUT FORMAT]
+Return ONLY a raw JSON object. No markdown code blocks (```json), no explanatory text, no sentences. Any violation causes a system error.
+
+[JSON STRUCTURE]
 {
+  "store_info": {
+    "name": "store name or null",
+    "address": "address or null",
+    "phone": "phone number or null"
+  },
+  "payment_info": {
+    "date": "YYYY-MM-DD or null",
+    "time": "HH:MM or null",
+    "total_price": integer or 0,
+    "currency": "KRW",
+    "tax": integer or 0,
+    "discount": integer or 0
+  },
   "items": [
-    {"name": "품목명", "price": 가격(숫자), "quantity": 수량(숫자), "category": "카테고리"}
+    {
+      "name": "item name or null",
+      "price": integer or 0,
+      "quantity": integer or 1,
+      "category": "one of: 식비, 교통비, 생필품, 문화생활, 전자기기, 기타"
+    }
   ],
-  "total_amount": 총액(숫자),
-  "top_category": "가장 많이 지출한 카테고리",
-  "most_expensive_item": "가장 비싼 품목명",
-  "analysis": "소비 패턴 분석 요약 (한글로 2-3문장)"
+  "quality_score": {
+    "is_readable": true or false,
+    "unrecognized_items_count": integer
+  }
 }
-반드시 순수 JSON 데이터만 반환해줘 (Markdown block ```json ... ``` 제외).
+
+[RULES]
+1. category MUST be one of: 식비, 교통비, 생필품, 문화생활, 전자기기, 기타
+2. date format: YYYY-MM-DD. time format: HH:MM. amounts: integer (no commas).
+3. If a field is unclear or missing, use null (strings) or 0 (numbers). NEVER guess or infer.
+4. If the image is not a receipt (photo, drawing, memo, etc.), set is_readable: false and return minimal JSON.
+5. For partially damaged items, set that item's name or price to null. Return all other valid items normally.
+
+[EXAMPLES]
+
+Example 1 - Normal receipt:
+Input: "스타벅스 강남점 / 2024-06-04 14:30 / 아이스 아메리카노 x2 4500원 / 합계 9000원"
+Output:
+{"store_info":{"name":"스타벅스 강남점","address":null,"phone":null},"payment_info":{"date":"2024-06-04","time":"14:30","total_price":9000,"currency":"KRW","tax":818,"discount":0},"items":[{"name":"아이스 아메리카노","price":4500,"quantity":2,"category":"식비"}],"quality_score":{"is_readable":true,"unrecognized_items_count":0}}
+
+Example 2 - Electronics (engineering items):
+Input: "엘레파츠 / 아두이노 키트 35000원, 점퍼 케이블 2500원, 조립형 컴퓨터 1200000원 / 합계 1237500원"
+Output:
+{"store_info":{"name":"엘레파츠","address":null,"phone":null},"payment_info":{"date":null,"time":null,"total_price":1237500,"currency":"KRW","tax":0,"discount":0},"items":[{"name":"아두이노 키트","price":35000,"quantity":1,"category":"전자기기"},{"name":"점퍼 케이블","price":2500,"quantity":1,"category":"전자기기"},{"name":"조립형 컴퓨터","price":1200000,"quantity":1,"category":"전자기기"}],"quality_score":{"is_readable":true,"unrecognized_items_count":0}}
+
+Example 3 - Partial damage:
+Input: "이마트 / [글자 훼손] 1000원 / 콜라 1500원"
+Output:
+{"store_info":{"name":"이마트","address":null,"phone":null},"payment_info":{"date":null,"time":null,"total_price":0,"currency":"KRW","tax":0,"discount":0},"items":[{"name":null,"price":1000,"quantity":1,"category":"생필품"},{"name":"콜라","price":1500,"quantity":1,"category":"식비"}],"quality_score":{"is_readable":true,"unrecognized_items_count":1}}
+
+Example 4 - Unreadable image:
+Input: landscape photo / drawing / random memo with no receipt content
+Output:
+{"store_info":{"name":null,"address":null,"phone":null},"payment_info":{"date":null,"time":null,"total_price":0,"currency":"KRW","tax":0,"discount":0},"items":[],"quality_score":{"is_readable":false,"unrecognized_items_count":0}}
+
+Now analyze the receipt image provided.
 """
 
 def _is_rate_limit_error(exc: Exception) -> bool:
