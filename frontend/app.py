@@ -2,220 +2,163 @@ import gradio as gr
 import requests
 import pandas as pd
 import io
-import plotly.express as px
 from PIL import Image
 from datetime import datetime
+import calendar
+import json
 
-# Backend API URLs
-BASE_URL = "http://localhost:8000"
-ANALYZE_URL = f"{BASE_URL}/analyze-receipt/"
-BULK_ANALYZE_URL = f"{BASE_URL}/analyze-receipts-bulk/"
-RECEIPTS_URL = f"{BASE_URL}/receipts/"
-BUDGET_URL = f"{BASE_URL}/budget/"
-ASK_AI_URL = f"{BASE_URL}/ask-ai/"
+API_URL = "http://localhost:8000/analyze-receipt/"
+HISTORY_URL = "http://localhost:8000/history/"
+ASK_AI_URL = "http://localhost:8000/ask-ai/"
+BUDGET_URL = "http://localhost:8000/budget/"
 
 custom_css = """
-body { background-color: #f4f6f9 !important; }
-.container { max-width: 1100px; margin: 0 auto; padding: 20px 15px; }
-.navbar {
-    display: flex; justify-content: space-between; align-items: center;
-    background: white; padding: 15px 30px; border-radius: 12px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 25px;
-}
-.nav-logo { font-size: 1.3rem; font-weight: 800; color: #1e293b; }
+body { background-color: #f8fafc !important; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
 .dashboard-card {
     background: white !important; border-radius: 16px !important; padding: 24px !important;
-    border: 1px solid #e2e8f0 !important; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.01) !important;
-    margin-bottom: 20px !important; 
+    border: 1px solid #e2e8f0 !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+    margin-bottom: 20px !important;
 }
-.welcome-text { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin-bottom: 15px; }
-.report-card {
-    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px;
-    padding: 16px 20px; margin-bottom: 25px;
-}
-.budget-amount { font-size: 1.6rem; font-weight: 800; color: #1e293b; margin-bottom: 12px; }
-.progress-container { background: #e2e8f0; border-radius: 9999px; height: 12px; width: 100%; position: relative; margin-bottom: 8px; }
-.progress-bar { background: #3b82f6; height: 100%; border-radius: 9999px; }
-@media (max-width: 768px) {
-    .container { padding: 10px 8px !important; }
-    
-    /* 네비게이션 가로 유지 */
-    .row.svelte-7xavid { 
-        display: flex !important; 
-        flex-direction: row !important; 
-        flex-wrap: nowrap !important;
-        overflow-x: auto !important;
-        gap: 4px !important;
-    }
-    
-    /* 로고 숨기기 */
-    .nav-logo { display: none !important; }
-    
-    /* 버튼 글씨 작게 */
-    .row.svelte-7xavid button { 
-        font-size: 11px !important; 
-        padding: 4px 6px !important;
-        white-space: nowrap !important;
-        min-width: fit-content !important;
-    }
-    
-    .dashboard-card { padding: 12px !important; }
-    .budget-amount { font-size: 1.1rem !important; }
-    .welcome-text { font-size: 1.2rem !important; }
+.card-title { font-size: 1.1rem; font-weight: 700; color: #1e293b; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
+.budget-amount { font-size: 1.8rem; font-weight: 800; color: #1e293b; margin-bottom: 8px; }
+.budget-amount span { font-size: 1rem; color: #64748b; font-weight: 500; }
+.progress-container { background: #e2e8f0; border-radius: 9999px; height: 12px; width: 100%; margin-bottom: 8px; }
+.progress-bar { background: #3b82f6; height: 100%; border-radius: 9999px; transition: width 0.3s ease; }
+.receipt-image-container { 
+    border: 2px dashed #e2e8f0; border-radius: 12px; padding: 10px; 
+    background: #f1f5f9; min-height: 200px; display: flex; align-items: center; justify-content: center;
 }
 """
 
+def fetch_history():
+    try:
+        response = requests.get(HISTORY_URL)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return []
+
 def fetch_budget():
     try:
-        res = requests.get(BUDGET_URL)
-        if res.status_code == 200:
-            return res.json().get("budget", 1000000)
+        response = requests.get(BUDGET_URL)
+        if response.status_code == 200:
+            return response.json().get("budget", 1000000)
     except Exception:
         pass
     return 1000000
 
 def set_budget(new_budget):
     try:
-        res = requests.post(BUDGET_URL, json={"budget": int(new_budget)})
-        if res.status_code == 200:
-            return int(new_budget), "예산이 저장되었습니다."
+        response = requests.post(BUDGET_URL, json={"budget": int(new_budget)})
+        if response.status_code == 200:
+            return int(new_budget), "✅ 예산이 저장되었습니다."
     except Exception as e:
-        return 1000000, f"오류: {str(e)}"
-    return 1000000, "저장 실패"
+        return 1000000, f"❌ 오류: {str(e)}"
+    return 1000000, "❌ 저장 실패"
 
-def get_budget_html(spent=0, total=1000000):
-    percent = int((spent / total) * 100) if total > 0 else 0
-    if percent > 100: percent = 100
+def get_budget_html(spent=0, total=1000000, daily_rec=0):
+    percent = min(int((spent / total) * 100), 100) if total > 0 else 0
+    color = "#3b82f6" if percent < 80 else "#ef4444" 
     return f"""
     <div class="budget-amount">₩{spent:,} <span>/ 예산 ₩{total:,}</span></div>
-    <div class="progress-container"><div class="progress-bar" style="width: {percent}%;"></div></div>
-    <div class="progress-percent">{percent}%</div>
+    <div class="progress-container"><div class="progress-bar" style="width: {percent}%; background-color: {color};"></div></div>
+    <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+        <span style="font-weight: 700; color: #64748b;">{percent}% 사용됨</span>
+        <span style="font-weight: 700; color: #059669;">📅 오늘 권장 지출: ₩{daily_rec:,}</span>
+    </div>
     """
 
-def fetch_data():
+def prepare_chart_data(history):
+    if not history:
+        return pd.DataFrame({"월": [], "지출액": []})
+    monthly_data = {}
+    for r in history:
+        m = r.get('date', '2026-06-01')[:7]
+        monthly_data[m] = monthly_data.get(m, 0) + r.get('total_amount', 0)
+    sorted_months = sorted(monthly_data.keys())
+    return pd.DataFrame({"월": sorted_months, "지출액": [monthly_data[m] for m in sorted_months]})
+
+def update_dashboard(history, budget):
+    total_spent = sum(r.get('total_amount', 0) for r in history)
+    
+    cat_counts = {}
+    stores = {}
+    max_item = {"name": "없음", "price": 0}
+    
+    for r in history:
+        cat = r.get('top_category', '기타')
+        cat_counts[cat] = cat_counts.get(cat, 0) + r.get('total_amount', 0)
+        
+        store = r.get('store_name', '알 수 없음')
+        stores[store] = stores.get(store, 0) + r.get('total_amount', 0)
+        
+        for item in r.get('items', []):
+            if item.get('price', 0) > max_item['price']:
+                max_item = item
+
+    top_store = max(stores.items(), key=lambda x: x[1])[0] if stores else "없음"
+    
+    now = datetime.now()
+    _, last_day = calendar.monthrange(now.year, now.month)
+    days_left = max(1, last_day - now.day + 1)
+    daily_rec = max(0, (budget - total_spent) // days_left)
+    
+    chart_df = prepare_chart_data(history)
+    
+    summary_html = f"""
+    <div style='display: flex; gap: 15px; margin-top: 20px;'>
+        <div style='flex: 1; background: #f0f9ff; padding: 15px; border-radius: 12px; border: 1px solid #bae6fd;'>
+            <div style='font-size: 0.85rem; color: #0369a1; font-weight: 600;'>가장 많이 방문한 곳</div>
+            <div style='font-size: 1.1rem; font-weight: 800; color: #0c4a6e; margin-top: 5px;'>🏢 {top_store}</div>
+        </div>
+        <div style='flex: 1; background: #fef2f2; padding: 15px; border-radius: 12px; border: 1px solid #b91c1c; border-style: solid;'>
+            <div style='font-size: 0.85rem; color: #b91c1c; font-weight: 600;'>이달의 최고가 품목</div>
+            <div style='font-size: 1.1rem; font-weight: 800; color: #7f1d1d; margin-top: 5px;'>💎 {max_item['name']}</div>
+        </div>
+    </div>
+    """
+    
+    return get_budget_html(total_spent, budget, daily_rec), cat_counts, chart_df, summary_html
+
+def update_table(history, search_query=""):
+    filtered = history
+    if search_query:
+        q = search_query.lower()
+        filtered = [r for r in history if q in r.get('store_name','').lower() or q in r.get('top_category','').lower()]
+    rows = [[r.get('date'), r.get('store_name'), r.get('top_category'), f"₩{r.get('total_amount',0):,}", "✅"] for r in filtered]
+    return pd.DataFrame(rows, columns=["날짜", "가맹점명", "카테고리", "금액", "상태"])
+
+def show_receipt_image(evt: gr.SelectData, history):
     try:
-        response = requests.get(RECEIPTS_URL)
-        if response.status_code == 200:
-            return response.json()
-    except:
-        return []
-    return []
+        idx = evt.index[0]
+        image_url = history[idx].get("image_url")
+        if image_url:
+            return gr.update(value=image_url, visible=True)
+    except Exception:
+        pass
+    return gr.update(value=None, visible=False)
 
-def _get_amount(analysis):
-    return analysis.get('payment_info', {}).get('total_price', 0)
-
-def _get_category(analysis):
-    items = analysis.get('items', [])
-    cats = [i.get('category') for i in items if i.get('category')]
-    return max(set(cats), key=cats.count) if cats else '기타'
-
-def _get_store(analysis):
-    return analysis.get('store_info', {}).get('name') or '-'
-
-def _get_date(r, analysis):
-    return analysis.get('payment_info', {}).get('date') or r.get('created_at', '').split('T')[0]
-
-def update_home():
-    data = fetch_data()
-    budget = fetch_budget()
-    total_spent = sum(_get_amount(r.get('analysis', {})) for r in data)
-    table_rows = []
-    category_counts = {}
-    latest_report = "영수증을 업로드하면 AI 소비 분석이 시작됩니다."
-
-    for r in reversed(data):
-        analysis = r.get('analysis', {})
-        amount = _get_amount(analysis)
-        cat = _get_category(analysis)
-        category_counts[cat] = category_counts.get(cat, 0) + amount
-        table_rows.append([_get_date(r, analysis), _get_store(analysis), cat, f"₩{amount:,}", "✅ 완료"])
-
-    df = pd.DataFrame(table_rows, columns=["날짜", "주요품목", "카테고리", "금액", "상태"])
-    if df.empty:
-        df = pd.DataFrame([["", "", "", "₩", ""]], columns=["날짜", "주요품목", "카테고리", "금액", "상태"])
-
-    cat_ratio = {k: v for k, v in category_counts.items()}
-    return df, get_budget_html(total_spent, budget), cat_ratio, f"<div class='report-card'><b>AI 소비 리포트</b><br>{latest_report}</div>", budget
-
-def update_analysis():
-    data = fetch_data()
-    if not data:
-        return px.bar(title="데이터가 없습니다."), px.pie(title="데이터가 없습니다.")
-
-    df_list = []
-    for r in data:
-        analysis = r.get('analysis', {})
-        df_list.append({
-            "날짜": _get_date(r, analysis),
-            "금액": _get_amount(analysis),
-            "카테고리": _get_category(analysis),
-        })
-
-    df = pd.DataFrame(df_list)
-    fig_bar = px.bar(df.groupby("카테고리")["금액"].sum().reset_index(), x="카테고리", y="금액", title="카테고리별 지출 합계")
-    fig_pie = px.pie(df, values="금액", names="카테고리", title="지출 비율")
-    return fig_bar, fig_pie
-
-def update_storage():
-    data = fetch_data()
-    gallery_items = []
-    for r in data:
-        if not r.get('image_url'):
-            continue
-        img_url = f"{BASE_URL}{r['image_url']}"
-        analysis = r.get('analysis', {})
-        amount = _get_amount(analysis)
-        info = f"{_get_date(r, analysis)}\n{amount:,}원"
-        gallery_items.append((img_url, info))
-    return gallery_items
-
-def bulk_upload(files, progress=gr.Progress()):
+def process_multiple_receipts(files, history):
     if not files:
-        return update_storage()
-    
-    failed = []
-    
-    for i, f in enumerate(files):
-        progress(i / len(files), desc=f"OCR 분석 중... ({i+1}/{len(files)})")
-        
-        path = f if isinstance(f, str) else f.name
-        with open(path, 'rb') as file_data:
-            files_payload = {'file': (path, file_data, 'image/png')}
-            res = requests.post(ANALYZE_URL, files=files_payload)
-        
-        # 실패 감지
-        if res.status_code != 200 or res.json() is None:
-            failed.append(path)
-    
-    progress(1.0, desc="완료!")
-    
-    if failed:
-        gr.Warning(f"일부 영수증 인식에 실패했습니다. ({len(failed)}건) 다시 시도해 주세요.")
-    
-    return update_storage()
-
-def delete_receipt_ui(receipt_id):
-    if not receipt_id:
-        return update_storage()
-    try:
-        # ID: {uuid}) 형식에서 uuid만 추출하기 위해 strip(")") 추가
-        actual_id = receipt_id.split("ID: ")[-1].strip(")") if "ID: " in receipt_id else receipt_id
-        res = requests.delete(f"{RECEIPTS_URL}{actual_id}")
-        if res.status_code == 200:
-            print(f"Deleted: {actual_id}")
-    except Exception as e:
-        print(f"Delete error: {e}")
-    return update_storage()
-
-def get_receipt_choices():
-    data = fetch_data()
-    choices = []
-    for r in reversed(data):
-        analysis = r.get('analysis', {})
-        date = _get_date(r, analysis)
-        store = _get_store(analysis)
-        choices.append(f"{date} | {store} (ID: {r['id']})")
-    return choices
+        return history, "파일을 업로드해주세요."
+    new_results = []
+    errors = 0
+    for file_path in files:
+        try:
+            with open(file_path, "rb") as f:
+                img_bytes = f.read()
+            res = requests.post(API_URL, files={'file': ('image.png', img_bytes, 'image/png')})
+            if res.status_code == 200:
+                new_results.append(res.json())
+            else:
+                errors += 1
+        except Exception:
+            errors += 1
+    updated_history = fetch_history()
+    msg = f"{len(new_results)}건 분석 완료" + (f" (오류 {errors}건)" if errors > 0 else "")
+    return updated_history, msg
 
 def chat_with_ai(user_input, chat_history):
     if not user_input:
@@ -228,191 +171,113 @@ def chat_with_ai(user_input, chat_history):
             answer = f"오류: {res.status_code}"
     except Exception as e:
         answer = f"연결 오류: {str(e)}"
-    chat_history.append({"role": "user", "content": user_input})
-    chat_history.append({"role": "assistant", "content": answer})
+    chat_history.append((user_input, answer))
     return "", chat_history
 
-def export_to_csv():
-    data = fetch_data()
-    if not data:
+def export_to_csv(history):
+    if not history:
         return None
-    rows = []
-    for r in data:
-        analysis = r.get('analysis', {})
-        rows.append({
-            "날짜": _get_date(r, analysis),
-            "가맹점": _get_store(analysis),
-            "카테고리": _get_category(analysis),
-            "금액": _get_amount(analysis),
-        })
-    df = pd.DataFrame(rows)
-    file_path = "receipts_export.csv"
-    df.to_csv(file_path, index=False, encoding="utf-8-sig")
-    return file_path
+    df = pd.DataFrame(history)
+    df.to_csv("receipts_export.csv", index=False, encoding="utf-8-sig")
+    return "receipts_export.csv"
 
-def _pages(show_idx):
-    return [gr.update(visible=(i == show_idx)) for i in range(4)]
-
-def _nav(active):
-    return [
-        gr.update(variant="primary"   if active == 0 else "secondary"),
-        gr.update(variant="primary"   if active == 1 else "secondary"),
-        gr.update(variant="primary"   if active == 2 else "secondary"),
-        gr.update(variant="primary"   if active == 3 else "secondary"),
-    ]
-
-def go_home():
-    return _nav(0) + _pages(0) + list(update_home())
-
-def go_analysis():
-    return _nav(1) + _pages(1) + list(update_analysis())
-
-def go_chat():
-    return _nav(2) + _pages(2)
-
-def go_storage():
-    return _nav(3) + _pages(3) + [update_storage()]
-
-with gr.Blocks(theme=gr.themes.Soft(), css=custom_css) as demo:
+with gr.Blocks(title="영수증 AI 비서", theme=gr.themes.Soft(), css=custom_css) as demo:
+    history_state = gr.State(fetch_history())
+    budget_state = gr.State(fetch_budget())
+    
     with gr.Column(elem_classes="container"):
-
-        # ── 내비게이션 버튼 바 ──
-        with gr.Row():
-            gr.HTML('<div class="nav-logo">영수증 AI</div>')
-            btn_home     = gr.Button("홈",           variant="primary",   size="sm", scale=0)
-            btn_analysis = gr.Button("소비분석",     variant="secondary", size="sm", scale=0)
-            btn_chat     = gr.Button("AI 소비 비서", variant="secondary", size="sm", scale=0)
-            btn_storage  = gr.Button("영수증보관함", variant="secondary", size="sm", scale=0)
-
-        # ── 페이지 1: 홈 ──
-        with gr.Column(visible=True) as page_home:
-            gr.HTML("<div class='welcome-text'>안녕하세요</div>")
-            report_box = gr.HTML()
-            with gr.Row():
-                with gr.Column(elem_classes="dashboard-card"):
-                    gr.HTML("<b>이달의 누적 지출</b>")
-                    budget_viewer = gr.HTML()
-                    with gr.Row():
-                        budget_input = gr.Number(label="월 목표 예산 설정", value=1000000, step=10000)
-                        budget_btn   = gr.Button("예산 저장", variant="secondary", scale=0)
-                    budget_msg = gr.Markdown("")
-                with gr.Column(elem_classes="dashboard-card"):
-                    gr.HTML("<b>카테고리별 소비 비율</b>")
-                    cat_label = gr.JSON(label="")
-            with gr.Column(elem_classes="dashboard-card"):
-                gr.Markdown("### 최근 업로드 내역")
-                receipt_table = gr.Dataframe(interactive=False)
-
-        # ── 페이지 2: 소비분석 ──
-        with gr.Column(visible=False) as page_analysis:
-            with gr.Row():
-                chart_bar = gr.Plot()
-                chart_pie = gr.Plot()
-            refresh_analysis = gr.Button("통계 새로고침", variant="primary")
-
-        # ── 페이지 3: AI 소비 비서 ──
-        with gr.Column(visible=False) as page_chat:
-            chatbot = gr.Chatbot(label="소비 상담", height=500)
-            with gr.Row():
-                chat_input = gr.Textbox(show_label=False, placeholder="질문을 입력하세요...", scale=9)
-                send_btn   = gr.Button("전송", scale=1)
-
-        # ── 페이지 4: 영수증보관함 ──
-        with gr.Column(visible=False) as page_storage:
-            with gr.Row():
-                with gr.Column(elem_classes="dashboard-card", scale=1):
-                    gr.Markdown("### 여러 영수증 한꺼번에 올리기")
-                    file_input = gr.File(file_count="multiple", label="이미지 선택")
-                    upload_btn = gr.Button("업로드 및 분석 시작", variant="primary")
-                with gr.Column(elem_classes="dashboard-card", scale=1):
-                    gr.Markdown("### 직접 입력하기")
-                    m_date     = gr.Textbox(label="날짜", value=datetime.now().strftime("%Y-%m-%d"), placeholder="YYYY-MM-DD")
-                    m_merchant = gr.Textbox(label="가맹점명", placeholder="예: 스타벅스")
-                    m_category = gr.Dropdown(label="카테고리", choices=["식비","교통비","생필품","문화생활","전자기기","기타"], value="기타")
-                    m_amount   = gr.Number(label="금액", value=0)
-                    m_status   = gr.Textbox(label="상태 (공란 가능)", placeholder="예: 현금결제")
-                    manual_btn = gr.Button("내역 추가", variant="secondary")
-            with gr.Column(elem_classes="dashboard-card"):
-                gr.Markdown("### 내역 삭제하기")
+        gr.HTML("<h1 style='color: #1e293b; margin-bottom: 24px;'>🧾 영수증 AI 소비 비서</h1>")
+        
+        with gr.Tabs():
+            with gr.Tab("📊 대시보드"):
                 with gr.Row():
-                    delete_select   = gr.Dropdown(label="삭제할 영수증 선택", choices=get_receipt_choices())
-                    refresh_del_btn = gr.Button("목록 갱신", scale=0)
-                    delete_btn      = gr.Button("선택한 내역 삭제", variant="stop", scale=1)
-            with gr.Row():
-                export_btn    = gr.Button("CSV 내보내기", variant="secondary")
+                    with gr.Column(scale=2, elem_classes="dashboard-card"):
+                        gr.HTML("<div class='card-title'>💰 지출 현황 및 예산 설정</div>")
+                        with gr.Row():
+                            budget_view = gr.HTML()
+                            with gr.Column():
+                                budget_input = gr.Number(label="월 목표 예산 설정", value=1000000, step=10000)
+                                budget_btn = gr.Button("예산 저장", variant="secondary")
+                                budget_msg = gr.Markdown("")
+                        summary_view = gr.HTML()
+                        
+                    with gr.Column(scale=1, elem_classes="dashboard-card"):
+                        gr.HTML("<div class='card-title'>🍩 카테고리 비율</div>")
+                        cat_label = gr.Label(show_label=False)
+                
+                with gr.Column(elem_classes="dashboard-card"):
+                    gr.HTML("<div class='card-title'>📈 월별 지출 트렌드</div>")
+                    trend_chart = gr.BarPlot(x="월", y="지출액", tooltip=["월", "지출액"], height=300)
+
+            with gr.Tab("📸 영수증 올리기"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        uploader = gr.File(file_count="multiple", file_types=["image"], label="영수증 이미지 업로드")
+                        analyze_btn = gr.Button("🚀 AI 분석 시작", variant="primary")
+                    with gr.Column(scale=1):
+                        status_msg = gr.Textbox(label="처리 상태", interactive=False)
+                        latest_analysis = gr.JSON(label="최근 분석 결과")
+
+            with gr.Tab("🤖 AI 소비 비서"):
+                chatbot = gr.Chatbot(label="소비 상담", height=500)
+                with gr.Row():
+                    chat_input = gr.Textbox(show_label=False, placeholder="질문을 입력하세요...", scale=9)
+                    send_btn = gr.Button("전송", scale=1)
+
+            with gr.Tab("📁 영수증 보관함"):
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        with gr.Row():
+                            search_box = gr.Textbox(show_label=False, placeholder="가맹점 또는 카테고리 검색...", scale=4)
+                            export_btn = gr.Button("📥 CSV 내보내기", scale=1)
+                        gr.Markdown("*(내역을 클릭하면 영수증 원본 이미지를 볼 수 있습니다)*")
+                        receipt_table = gr.Dataframe(interactive=False)
+                    with gr.Column(scale=1, elem_classes="dashboard-card"):
+                        gr.HTML("<div class='card-title'>🖼️ 영수증 원본 미리보기</div>")
+                        receipt_img_viewer = gr.Image(label="원본 이미지", interactive=False, visible=True)
+                
                 download_file = gr.File(label="다운로드", visible=False)
-            receipt_gallery = gr.Gallery(label="내 영수증 목록", columns=4, height="auto")
 
-    # ── 이벤트 ── 버튼 클릭했을때 색 변환 
-    pages        = [page_home, page_analysis, page_chat, page_storage]
-    home_outputs = [receipt_table, budget_viewer, cat_label, report_box, budget_input]
+    def refresh_all(history, budget):
+        b_html, c_data, t_df, s_html = update_dashboard(history, budget)
+        table_df = update_table(history)
+        return b_html, c_data, t_df, table_df, budget, s_html
 
-    nav_btns = [btn_home, btn_analysis, btn_chat, btn_storage]
+    demo.load(
+        fn=lambda h, b: refresh_all(h, b),
+        inputs=[history_state, budget_state],
+        outputs=[budget_view, cat_label, trend_chart, receipt_table, budget_input, summary_view]
+    )
 
-    btn_home.click(    fn=go_home,     outputs=nav_btns + pages + home_outputs)
-    btn_analysis.click(fn=go_analysis, outputs=nav_btns + pages + [chart_bar, chart_pie])
-    btn_chat.click(    fn=go_chat,     outputs=nav_btns + pages)
-    btn_storage.click( fn=go_storage,  outputs=nav_btns + pages + [receipt_gallery])
+    budget_btn.click(
+        fn=set_budget,
+        inputs=[budget_input],
+        outputs=[budget_state, budget_msg]
+    ).then(
+        fn=refresh_all,
+        inputs=[history_state, budget_state],
+        outputs=[budget_view, cat_label, trend_chart, receipt_table, budget_input, summary_view]
+    )
 
-    demo.load(update_home, None, home_outputs)
+    analyze_btn.click(
+        process_multiple_receipts, 
+        inputs=[uploader, history_state], 
+        outputs=[history_state, status_msg]
+    ).then(
+        fn=refresh_all,
+        inputs=[history_state, budget_state],
+        outputs=[budget_view, cat_label, trend_chart, receipt_table, budget_input, summary_view]
+    )
 
-    def on_budget_save(new_budget):
-        saved_budget, msg = set_budget(new_budget)
-        data = fetch_data()
-        total_spent = sum(_get_amount(r.get('analysis', {})) for r in data)
-        return get_budget_html(total_spent, saved_budget), msg
+    search_box.change(update_table, inputs=[history_state, search_box], outputs=[receipt_table])
+    receipt_table.select(show_receipt_image, inputs=[history_state], outputs=[receipt_img_viewer])
 
-    budget_btn.click(on_budget_save, inputs=[budget_input], outputs=[budget_viewer, budget_msg])
-    refresh_analysis.click(update_analysis, None, [chart_bar, chart_pie])
-
-    chat_input.submit(chat_with_ai, inputs=[chat_input, chatbot], outputs=[chat_input, chatbot])
-    send_btn.click(   chat_with_ai, inputs=[chat_input, chatbot], outputs=[chat_input, chatbot])
-
-    def add_manual_entry(date_str, merchant, category, amount, status):
-        try:
-            payload = {"date": date_str, "merchant": merchant, "category": category, "amount": amount, "status": status}
-            requests.post(f"{BASE_URL}/receipts/manual/", json=payload)
-        except Exception:
-            pass
-        return update_storage(), gr.update(choices=get_receipt_choices())
-
-    def refresh_delete_list():
-        return gr.update(choices=get_receipt_choices())
-
-    upload_btn.click(
-    fn=lambda: gr.update(interactive=False, value="분석 중..."),
-    outputs=upload_btn
-).then(
-    fn=bulk_upload,
-    inputs=file_input,
-    outputs=receipt_gallery
-).then(
-    fn=lambda: gr.update(interactive=True, value="업로드 및 분석 시작"),
-    outputs=upload_btn
-).then(
-    update_home, None, home_outputs
-).then(
-    refresh_delete_list, None, delete_select
-)
-
-
-    manual_btn.click(
-        add_manual_entry,
-        inputs=[m_date, m_merchant, m_category, m_amount, m_status],
-        outputs=[receipt_gallery, delete_select]
-    ).then(update_home, None, home_outputs)
-
-    delete_btn.click(delete_receipt_ui, inputs=delete_select, outputs=receipt_gallery).then(
-        update_home, None, home_outputs
-    ).then(refresh_delete_list, None, delete_select)
-
-    refresh_del_btn.click(refresh_delete_list, None, delete_select)
-
-    export_btn.click(export_to_csv, None, download_file).then(
+    export_btn.click(export_to_csv, inputs=[history_state], outputs=[download_file]).then(
         lambda: gr.update(visible=True), None, download_file
     )
 
+    chat_input.submit(chat_with_ai, inputs=[chat_input, chatbot], outputs=[chat_input, chatbot])
+    send_btn.click(chat_with_ai, inputs=[chat_input, chatbot], outputs=[chat_input, chatbot])
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)
-

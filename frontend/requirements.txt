@@ -1,4 +1,4 @@
 gradio
 requests
 pandas
-charset-normalizer
+pillow

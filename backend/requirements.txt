@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-groq
 python-multipart
+groq
 python-dotenv
 tenacity
