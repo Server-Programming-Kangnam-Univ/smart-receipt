@@ -198,7 +198,8 @@ def delete_receipt_ui(receipt_id):
     if not receipt_id:
         return update_storage()
     try:
-        actual_id = receipt_id.split("ID: ")[-1] if "ID: " in receipt_id else receipt_id
+        # ID: {uuid}) 형식에서 uuid만 추출하기 위해 strip(")") 추가
+        actual_id = receipt_id.split("ID: ")[-1].strip(")") if "ID: " in receipt_id else receipt_id
         res = requests.delete(f"{RECEIPTS_URL}{actual_id}")
         if res.status_code == 200:
             print(f"Deleted: {actual_id}")
