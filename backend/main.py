@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from groq import Groq
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+from services import receipt_service
 
 load_dotenv()
 
@@ -81,7 +82,7 @@ JSON 구조:
     {"name": "품목명", "price": 가격(숫자), "quantity": 수량(숫자), "category": "카테고리"}
   ],
   "total_amount": 총액(숫자),
-  "top_category": "가장 많이 지출한 카테고리",
+  "top_category": "전체 지출을 대표하는 카테고리 (반드시 다음 중 하나만 선택: 식비, 교통, 쇼핑, 문화, 의료, 기타)",
   "most_expensive_item": "가장 비싼 품목명",
   "analysis": "소비 패턴 분석 요약 (한글로 2-3문장)"
 }
@@ -124,10 +125,18 @@ async def analyze_receipt(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Groq API Key가 설정되지 않았습니다.")
 
     try:
-        image_bytes = await file.read()
-        mime_type = file.content_type or "image/jpeg"
+        original_bytes = await file.read()
+        
+        # [정윤서 기여] 고밀도 이미지 전처리 적용 (그레이스케일, 이진화, 팽창)
+        try:
+            processed_bytes = receipt_service.preprocess_image(original_bytes)
+            mime_type = "image/png"  # 분석 정확도를 높이기 위해 PNG 사용
+        except Exception as e:
+            print(f"Preprocessing Error: {e}")
+            processed_bytes = original_bytes
+            mime_type = file.content_type or "image/jpeg"
 
-        text_response = _call_groq(image_bytes, mime_type)
+        text_response = _call_groq(processed_bytes, mime_type)
 
         if text_response.startswith("```json"):
             text_response = text_response[7:]
@@ -146,7 +155,7 @@ async def analyze_receipt(file: UploadFile = File(...)):
 
         try:
             analysis_data = json.loads(text_response)
-            save_receipt(analysis_data, image_bytes, mime_type) # 이미지와 함께 저장
+            # save_receipt(analysis_data, image_bytes, mime_type) # 자동 저장 로직 제거
         except json.JSONDecodeError:
             print(f"AI 응답 (JSON 파싱 실패): {text_response}")
             raise HTTPException(
@@ -168,6 +177,96 @@ async def analyze_receipt(file: UploadFile = File(...)):
             )
         raise HTTPException(status_code=500, detail=f"영수증 분석 중 오류가 발생했습니다: {error_msg}")
 
+
+CSV_PROMPT = """
+제공된 CSV 데이터를 분석하여 각 행의 정보를 추출하고, 다음 JSON 배열 형식으로만 응답해줘.
+카테고리는 반드시 다음 중 하나만 선택해야 해: 식비, 교통, 쇼핑, 문화, 의료, 기타.
+데이터 구조:
+[
+  {
+    "date": "YYYY-MM-DD",
+    "store_name": "가맹점명",
+    "top_category": "카테고리",
+    "total_amount": 총액(숫자)
+  }
+]
+반드시 순수 JSON 데이터만 반환해줘.
+"""
+
+@app.post("/analyze-csv/")
+async def analyze_csv_endpoint(file: UploadFile = File(...)):
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="Groq API Key가 설정되지 않았습니다.")
+    
+    try:
+        csv_bytes = await file.read()
+        csv_text = csv_bytes.decode('utf-8')
+        
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": CSV_PROMPT},
+                {"role": "user", "content": csv_text}
+            ],
+            temperature=0.2,
+        )
+        
+        text_response = response.choices[0].message.content.strip()
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.startswith("```"):
+            text_response = text_response[3:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+            
+        text_response = text_response.strip()
+        
+        try:
+            analysis_data = json.loads(text_response)
+            if not isinstance(analysis_data, list):
+                analysis_data = [analysis_data]
+            return analysis_data
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=422, detail="AI가 CSV 형식을 제대로 변환하지 못했습니다.")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV 분석 중 오류가 발생했습니다: {str(e)}")
+
+@app.post("/save-receipt/")
+async def save_confirmed_receipt(data: str = File(...), file: UploadFile = File(None)):
+    """사용자가 확인 및 수정한 영수증 데이터를 최종 저장"""
+    try:
+        receipt_data = json.loads(data)
+        image_bytes = await file.read() if file else None
+        mime_type = file.content_type if file else None
+        
+        save_receipt(receipt_data, image_bytes, mime_type)
+        return {"message": "영수증이 성공적으로 저장되었습니다.", "data": receipt_data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"저장 중 오류 발생: {str(e)}")
+
+from fastapi import Request
+
+@app.post("/save-receipts-bulk/")
+async def save_bulk_receipts(request: Request):
+    """CSV 등으로 대량 입력된 영수증 데이터를 한 번에 저장"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, list):
+            raise HTTPException(status_code=400, detail="Payload must be a list of receipts.")
+
+        receipts = load_receipts()
+        for item in payload:
+            item["image_url"] = None  # CSV 업로드는 이미지가 없음
+            item["id"] = str(time.time()) # 임시 ID
+            receipts.insert(0, item)
+
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(receipts, f, ensure_ascii=False, indent=2)
+
+        return {"message": f"{len(payload)}건의 데이터가 성공적으로 저장되었습니다."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"대량 저장 중 오류 발생: {str(e)}")
 
 @app.get("/history/")
 def get_history():

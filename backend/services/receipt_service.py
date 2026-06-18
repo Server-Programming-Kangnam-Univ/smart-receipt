@@ -16,16 +16,24 @@ def init_receipt_storage():
             json.dump([], f)
 
 def preprocess_image(image_bytes: bytes) -> bytes:
+    """정윤서 기여: 고밀도 전처리 파이프라인 (그레이스케일 + 이진화 + 팽창)"""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     if img is None:
         return image_bytes
 
+    # 1. 그레이스케일 변환
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # 2. 오츠 이진화 (배경과 글자 분리 극대화)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # 3. 팽창 연산 (끊어진 글자 획 보정)
     kernel = np.ones((2,2), np.uint8)
     dilated = cv2.dilate(thresh, kernel, iterations=1)
+    
+    # 4. 고화질 PNG 인코딩 (인식률 우선)
     _, encoded_img = cv2.imencode('.png', dilated)
     return encoded_img.tobytes()
 

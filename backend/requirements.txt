@@ -4,3 +4,5 @@ python-multipart
 groq
 python-dotenv
 tenacity
+opencv-python
+numpy

@@ -1,0 +1,47 @@
+[
+  {
+    "date": "2026-06-17",
+    "top_category": "쇼핑",
+    "store_name": "올리브영",
+    "total_amount": 32000,
+    "items": [],
+    "image_url": null,
+    "id": "1781762422.26558"
+  },
+  {
+    "date": "2026-06-16",
+    "top_category": "교통",
+    "store_name": "카카오T 택시",
+    "total_amount": 8400,
+    "items": [],
+    "image_url": null,
+    "id": "1781762422.2655776"
+  },
+  {
+    "date": "2026-06-15",
+    "top_category": "식비",
+    "store_name": "맥도날드 강남점",
+    "total_amount": 15500,
+    "items": [],
+    "image_url": null,
+    "id": "1781762422.2655747"
+  },
+  {
+    "date": "2026-06-16",
+    "top_category": "교통",
+    "store_name": "카카오T 택시",
+    "total_amount": 8400,
+    "items": [],
+    "image_url": null,
+    "id": "1781762422.2655709"
+  },
+  {
+    "date": "2026-06-15",
+    "top_category": "식비",
+    "store_name": "맥도날드 강남점",
+    "total_amount": 15500,
+    "items": [],
+    "image_url": null,
+    "id": "1781762422.265559"
+  }
+]
